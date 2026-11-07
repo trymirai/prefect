@@ -3441,6 +3441,19 @@ class TestPrefectClientRaiseForAPIVersionMismatch:
             in caplog.text
         )
 
+    async def test_no_warning_for_local_build_of_server_version(
+        self, prefect_client, monkeypatch, caplog
+    ):
+        monkeypatch.setattr(
+            prefect_client, "api_version", AsyncMock(return_value="3.8.5")
+        )
+        monkeypatch.setattr(
+            prefect_client, "client_version", Mock(return_value="3.8.5+1.gbe71f014b")
+        )
+        await prefect_client.raise_for_api_version_mismatch()
+
+        assert "older version of Prefect" not in caplog.text
+
     async def test_raise_for_api_version_mismatch_once_caches_success(
         self, prefect_client, monkeypatch
     ):
@@ -3634,6 +3647,21 @@ class TestSyncClientRaiseForAPIVersionMismatch:
             "Your Prefect server is running an older version of Prefect than your client which may result in unexpected behavior."
             in caplog.text
         )
+
+    def test_no_warning_for_local_build_of_server_version(
+        self, sync_prefect_client, monkeypatch, caplog
+    ):
+        monkeypatch.setattr(
+            sync_prefect_client, "api_version", Mock(return_value="3.8.5")
+        )
+        monkeypatch.setattr(
+            sync_prefect_client,
+            "client_version",
+            Mock(return_value="3.8.5+1.gbe71f014b"),
+        )
+        sync_prefect_client.raise_for_api_version_mismatch()
+
+        assert "older version of Prefect" not in caplog.text
 
     def test_raise_for_api_version_mismatch_once_caches_success(
         self, sync_prefect_client, monkeypatch
@@ -3887,3 +3915,22 @@ class TestPrefectClientMethods:
             async_client_methods - exclude_methods
             == sync_client_methods - exclude_methods
         )
+
+
+class TestCheckServerVersionLocalBuild:
+    async def test_no_warning_for_local_build_of_server_version(
+        self, monkeypatch, caplog
+    ):
+        monkeypatch.setattr(prefect, "__version__", "3.8.5+1.gbe71f014b")
+        with (
+            temporary_settings({PREFECT_CLIENT_SERVER_VERSION_CHECK_ENABLED: True}),
+            respx.mock,
+        ):
+            respx.get("http://local-build:4200/api/admin/version").mock(
+                return_value=httpx.Response(200, json="3.8.5")
+            )
+            await check_server_version(
+                "http://local-build:4200/api", logging.getLogger("test")
+            )
+
+        assert "older version of Prefect" not in caplog.text

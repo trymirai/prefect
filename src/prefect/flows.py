@@ -2394,6 +2394,8 @@ class InfrastructureBoundFlow(Flow[P, R]):
         work_pool: The name of the work pool to run the flow on. The base job
             configuration of the work pool will determine the configuration of the
             infrastructure the flow will run on.
+        work_queue_name: The work queue to use with `submit_to_work_pool`. Defaults
+            to the work pool's default queue.
         job_variables: Infrastructure configuration that will override the base job
             configuration of the work pool.
         launcher: Optional upload and execution launcher overrides.
@@ -2411,6 +2413,7 @@ class InfrastructureBoundFlow(Flow[P, R]):
         work_pool: str,
         job_variables: dict[str, Any],
         worker_cls: type["BaseWorker[Any, Any, Any]"],
+        work_queue_name: str | None = None,
         launcher: BundleLauncher | None = None,
         include_files: Sequence[str] | None = None,
         include_files_base_dir: Path | str | None = None,
@@ -2418,6 +2421,7 @@ class InfrastructureBoundFlow(Flow[P, R]):
     ):
         super().__init__(*args, **kwargs)
         self.work_pool = work_pool
+        self.work_queue_name = work_queue_name
         self.job_variables = job_variables
         self.worker_cls = worker_cls
         self.launcher: BundleLauncherOverride | None = normalize_launcher(launcher)
@@ -2618,6 +2622,10 @@ class InfrastructureBoundFlow(Flow[P, R]):
         This method will create a flow run for an existing worker to submit to remote infrastructure.
         If you don't have a worker available, use `submit` instead.
 
+        To select a work queue, set `work_queue_name` when binding the flow or use
+        `with_options(work_queue_name="my-queue")` before submitting. If unset, the
+        work pool's default queue is used.
+
         Args:
             *args: Positional arguments to pass to the flow.
             **kwargs: Keyword arguments to pass to the flow.
@@ -2757,6 +2765,7 @@ class InfrastructureBoundFlow(Flow[P, R]):
                 state=Pending(),
                 job_variables=job_variables,
                 work_pool_name=work_pool.name,
+                work_queue_name=self.work_queue_name,
                 tags=TagsContext.get().current_tags,
                 parent_task_run_id=getattr(parent_task_run, "id", None),
             )
@@ -2815,6 +2824,7 @@ class InfrastructureBoundFlow(Flow[P, R]):
         on_crashed: Optional[list[FlowStateHook[P, R]]] = None,
         on_running: Optional[list[FlowStateHook[P, R]]] = None,
         job_variables: Optional[dict[str, Any]] = None,
+        work_queue_name: str | None = NotSet,  # type: ignore
         launcher: BundleLauncher | None = NotSet,  # type: ignore
         include_files: Optional[list[str]] = NotSet,  # type: ignore
         include_files_base_dir: Path | str | None = NotSet,  # type: ignore
@@ -2847,6 +2857,9 @@ class InfrastructureBoundFlow(Flow[P, R]):
             job_variables=job_variables
             if job_variables is not None
             else self.job_variables,
+            work_queue_name=work_queue_name
+            if work_queue_name is not NotSet
+            else self.work_queue_name,
             launcher=launcher if launcher is not NotSet else self.launcher,
             include_files=include_files
             if include_files is not NotSet
@@ -2866,6 +2879,7 @@ def bind_flow_to_infrastructure(
     launcher: BundleLauncher | None = None,
     include_files: Sequence[str] | None = None,
     *,
+    work_queue_name: str | None = None,
     include_files_base_dir: Path | str | None = None,
 ) -> InfrastructureBoundFlow[P, R]:
     """Bind a flow to execution on a specific infrastructure work pool.
@@ -2873,6 +2887,8 @@ def bind_flow_to_infrastructure(
     Args:
         flow: The flow to bind.
         work_pool: The name of the work pool to use.
+        work_queue_name: The work queue to use with `submit_to_work_pool`. Defaults
+            to the work pool's default queue.
         worker_cls: The worker class that submits the flow.
         job_variables: Infrastructure overrides for the work pool's base job template.
         launcher: Optional upload and execution launcher overrides.
@@ -2887,6 +2903,7 @@ def bind_flow_to_infrastructure(
     new = InfrastructureBoundFlow[P, R](
         flow.fn,
         work_pool=work_pool,
+        work_queue_name=work_queue_name,
         job_variables=job_variables or {},
         worker_cls=worker_cls,
         launcher=launcher,
@@ -2897,6 +2914,7 @@ def bind_flow_to_infrastructure(
     for attr, value in flow.__dict__.items():
         setattr(new, attr, value)
     new.work_pool = work_pool
+    new.work_queue_name = work_queue_name
     new.job_variables = job_variables or {}
     new.worker_cls = worker_cls
     new.launcher = normalize_launcher(launcher)

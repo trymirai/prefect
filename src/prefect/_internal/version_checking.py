@@ -178,7 +178,7 @@ async def check_server_version(
         )
         return
 
-    client_ver = version.parse(client_version)
+    client_ver = version.parse(version.parse(client_version).public)
 
     if api_ver.major != client_ver.major:
         raise RuntimeError(

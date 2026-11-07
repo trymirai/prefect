@@ -1138,7 +1138,7 @@ class PrefectClient(
             ) from e
 
         api_version = version.parse(api_version)
-        client_version = version.parse(self.client_version())
+        client_version = version.parse(version.parse(self.client_version()).public)
 
         if api_version.major != client_version.major:
             raise RuntimeError(
@@ -1529,7 +1529,7 @@ class SyncPrefectClient(
             ) from e
 
         api_version = version.parse(api_version)
-        client_version = version.parse(self.client_version())
+        client_version = version.parse(version.parse(self.client_version()).public)
 
         if api_version.major != client_version.major:
             raise RuntimeError(

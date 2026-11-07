@@ -466,6 +466,7 @@ def create_bundle_for_flow_run(
                     _get_uv_path(),
                     "pip",
                     "freeze",
+                    "--quiet",
                     # Exclude editable installs because we won't be able to install them in the execution environment
                     "--exclude-editable",
                 ]

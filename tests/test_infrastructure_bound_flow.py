@@ -289,6 +289,33 @@ class TestInfrastructureBoundFlow:
         assert infrastructure_bound_flow.job_variables == {"key": "value"}
         assert infrastructure_bound_flow.launcher is None
 
+    @pytest.mark.parametrize(
+        "options, expected_queue",
+        [
+            ({}, "original"),
+            ({"work_queue_name": "other"}, "other"),
+            ({"work_queue_name": None}, None),
+        ],
+    )
+    def test_with_options_work_queue_name(
+        self, options: dict[str, Any], expected_queue: str | None
+    ):
+        @flow
+        def my_flow() -> str:
+            return "Hello"
+
+        original_flow = bind_flow_to_infrastructure(
+            my_flow,
+            work_pool="my-pool",
+            worker_cls=ProcessWorker,
+            work_queue_name="original",
+        )
+
+        new_flow = original_flow.with_options(**options)
+
+        assert new_flow.work_queue_name == expected_queue
+        assert original_flow.work_queue_name == "original"
+
     def test_bind_flow_to_infrastructure_normalizes_launcher(
         self, work_pool: WorkPool, result_storage: LocalFileSystem
     ):
@@ -531,6 +558,7 @@ class TestInfrastructureBoundFlow:
             future.result()
 
     @pytest.mark.filterwarnings("ignore::FutureWarning")
+    @pytest.mark.parametrize("work_queue_name", [None, "custom-queue"])
     async def test_dispatch(
         self,
         work_pool: WorkPool,
@@ -538,27 +566,41 @@ class TestInfrastructureBoundFlow:
         mock_subprocess_check_call: MagicMock,
         frozen_uuid: uuid.UUID,
         prefect_client: PrefectClient,
+        work_queue_name: str | None,
+        monkeypatch: pytest.MonkeyPatch,
     ):
+        monkeypatch.setattr("prefect.__version__", "3.6.99")
         python_version_info = sys.version_info
+        expected_queue_id = work_pool.default_queue_id
+        if work_queue_name is not None:
+            queue = await prefect_client.create_work_queue(
+                name=work_queue_name, work_pool_name=work_pool.name
+            )
+            expected_queue_id = queue.id
 
         @flow(
             result_storage=result_storage,
         )
-        def my_flow(x: int, y: int):
+        def my_flow(x: int, y: int, work_queue_name: str) -> int:
             return x + y
 
         infrastructure_bound_flow = bind_flow_to_infrastructure(
-            flow=my_flow, work_pool=work_pool.name, worker_cls=ProcessWorker
+            flow=my_flow,
+            work_pool=work_pool.name,
+            worker_cls=ProcessWorker,
+            work_queue_name=work_queue_name,
         )
 
-        future = infrastructure_bound_flow.submit_to_work_pool(x=1, y=2)
+        future = infrastructure_bound_flow.submit_to_work_pool(
+            x=1, y=2, work_queue_name="flow-parameter"
+        )
         assert future.state.is_scheduled()
         expected_upload_command = [
             "uv",
             "run",
             "--quiet",
             "--with",
-            "prefect-mock==0.5.5",
+            "prefect-mock==0.5.5,prefect==3.6.99",
             "--python",
             f"{python_version_info.major}.{python_version_info.minor}",
             "-m",
@@ -579,7 +621,7 @@ class TestInfrastructureBoundFlow:
             "uv",
             "run",
             "--with",
-            "prefect-mock==0.5.5",
+            "prefect-mock==0.5.5,prefect==3.6.99",
             "--python",
             f"{python_version_info.major}.{python_version_info.minor}",
             "-m",
@@ -593,7 +635,13 @@ class TestInfrastructureBoundFlow:
         ]
         flow_run = await prefect_client.read_flow_run(future.flow_run_id)
         assert flow_run.work_pool_name == work_pool.name
-        assert flow_run.work_queue_name == "default"
+        assert flow_run.work_queue_name == (work_queue_name or "default")
+        assert flow_run.work_queue_id == expected_queue_id
+        assert flow_run.parameters == {
+            "x": 1,
+            "y": 2,
+            "work_queue_name": "flow-parameter",
+        }
         assert flow_run.job_variables == {
             "command": command_to_string(expected_execute_command)
         }
